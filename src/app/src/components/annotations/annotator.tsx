@@ -49,6 +49,7 @@ import FileModal from "./filemodal";
 import AnnotatorSettings from "./utils/annotatorsettings";
 import FormatTimerSeconds from "./utils/timer";
 import { RegisteredModel } from "./model";
+import AnalyticsBar from "./analyicsbar";
 
 type Point = [number, number];
 type MapType = L.DrawMap;
@@ -148,6 +149,8 @@ interface AnnotatorState {
     opacity: number;
   };
   currAnnotationPlaybackId: number;
+  videoIntervals: any;
+  isAnalyticsMode: boolean;
 }
 
 /**
@@ -246,6 +249,8 @@ export default class Annotator extends Component<
         },
       },
       currAnnotationPlaybackId: 0,
+      videoIntervals: [],
+      isAnalyticsMode: false,
     };
 
     this.toaster = new Toaster({}, {});
@@ -272,6 +277,7 @@ export default class Annotator extends Component<
     this.showToaster = this.showToaster.bind(this);
     this.renderProgress = this.renderProgress.bind(this);
     this.singleAnalysis = this.singleAnalysis.bind(this);
+    this.transformToGraphFormat = this.transformToGraphFormat.bind(this);
     this.getInference = this.getInference.bind(this);
     this.bulkAnalysis = this.bulkAnalysis.bind(this);
     this.updateAnnotations = this.updateAnnotations.bind(this);
@@ -732,6 +738,41 @@ export default class Annotator extends Component<
     });
   }
 
+  private transformToGraphFormat(framesObject) {
+    const framesObjectSize = Object.keys(framesObject).length;
+    const lastFrame = Object.keys(framesObject)[framesObjectSize - 1];
+    const intervals = Math.floor(lastFrame / 1000); // hardcoded 1000 to get every second
+
+    const filteredIntervals = [];
+
+    for (let i = 0; i < intervals; i++) {
+      const filteredFrameInfo = framesObject[i * 1000].reduce(
+        (result, annotation) => {
+          if (annotation.confidence > this.state.confidence) {
+            result.push(annotation.tag);
+          }
+          return result;
+        }, []);
+
+      const condensedFrameInfo = filteredFrameInfo.reduce((result, curr) => {
+        const item = result.length > 0 && result.find(obj => Object.keys(obj)[0] === curr.name)
+        if (item) {
+          item[curr.name] += 1;
+        } else {
+          result.push({ [curr.name]: 1 })
+        }
+        return result;
+      }, []);
+
+      const graphFormatInfo = { name: i };
+      condensedFrameInfo.forEach((item) => {
+        Object.assign(graphFormatInfo, item);
+      });
+      filteredIntervals.push(graphFormatInfo);
+    }
+    return filteredIntervals;
+  }
+
   /**
    * Centralized Handler to Perform predictions on both Video and Images
    */
@@ -786,6 +827,10 @@ export default class Annotator extends Component<
         this.state.inferenceOptions.iou
       )
         .then(response => {
+          if (response.data?.frames) {
+            const filteredIntervals = this.transformToGraphFormat(response.data.frames);
+            this.setState({ videoIntervals: filteredIntervals });
+          }
           if (this.currentAsset.url === asset.url && singleAnalysis) {
             const videoElement = this.videoOverlay.getElement();
             /**
@@ -1100,11 +1145,11 @@ export default class Annotator extends Component<
           (this.state.filterArr.length === 0 ||
             /* Check if tag is present in filter (CASE-INSENSITIVE) */
             this.state.showSelected ===
-              this.state.filterArr.some(filter =>
-                invertedProjectTags[annotation.options.annotationTag]
-                  .toLowerCase()
-                  .includes(filter.toLowerCase())
-              )) &&
+            this.state.filterArr.some(filter =>
+              invertedProjectTags[annotation.options.annotationTag]
+                .toLowerCase()
+                .includes(filter.toLowerCase())
+            )) &&
           annotation.options.confidence >= this.state.confidence
       )
       .forEach((confidentAnnotation: any) => {
@@ -1544,7 +1589,6 @@ export default class Annotator extends Component<
     const visibleAssets = this.state.assetList.filter(() =>
       this.isAssetVisible()
     );
-
     return (
       <div>
         <Toaster {...this.state} ref={this.refHandlers.toaster} />
@@ -1554,6 +1598,9 @@ export default class Annotator extends Component<
             className={[isCollapsed, "image-list"].join("")}
             id={"image-list"}
           >
+            {this.currentAsset.type === "video" ?
+              <Button small onClick={() => this.setState({ isAnalyticsMode: !this.state.isAnalyticsMode })} >Show Analytics</Button>
+              : null}
             <Button
               className={[collapsedButtonTheme, "collapse-button"].join("")}
               large
@@ -1574,15 +1621,26 @@ export default class Annotator extends Component<
               className={[isCollapsed, "image-bar"].join("")}
               id={"image-bar"}
             >
-              <ImageBar
-                ref={ref => {
-                  this.imagebarRef = ref;
-                }}
-                /* Only visible assets should be shown */
-                assetList={visibleAssets}
-                callbacks={{ selectAssetCallback: this.selectAsset }}
-                {...this.props}
-              />
+              {this.state.isAnalyticsMode &&
+                this.state.videoIntervals.length !== 0 &&
+                this.videoOverlay ? (
+                <AnalyticsBar
+                  videoIntervals={this.state.videoIntervals}
+                  confidence={this.state.confidence}
+                  videoElement={this.videoOverlay.getElement()}
+                  tags={Object.keys(this.state.tagInfo.tags)}
+                />
+              ) :
+                <ImageBar
+                  ref={ref => {
+                    this.imagebarRef = ref;
+                  }}
+                  /* Only visible assets should be shown */
+                  assetList={visibleAssets}
+                  callbacks={{ selectAssetCallback: this.selectAsset }}
+                  {...this.props}
+                />
+              }
             </Card>
           </div>
 

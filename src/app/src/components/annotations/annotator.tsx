@@ -150,6 +150,7 @@ interface AnnotatorState {
   };
   currAnnotationPlaybackId: number;
   videoIntervals: any;
+  graphYValues: any;
   isAnalyticsMode: boolean;
 }
 
@@ -250,6 +251,7 @@ export default class Annotator extends Component<
       },
       currAnnotationPlaybackId: 0,
       videoIntervals: [],
+      graphYValues: [],
       isAnalyticsMode: false,
     };
 
@@ -278,6 +280,7 @@ export default class Annotator extends Component<
     this.renderProgress = this.renderProgress.bind(this);
     this.singleAnalysis = this.singleAnalysis.bind(this);
     this.transformToGraphFormat = this.transformToGraphFormat.bind(this);
+    this.handleGraphClick = this.handleGraphClick.bind(this);
     this.getInference = this.getInference.bind(this);
     this.bulkAnalysis = this.bulkAnalysis.bind(this);
     this.updateAnnotations = this.updateAnnotations.bind(this);
@@ -738,18 +741,28 @@ export default class Annotator extends Component<
     });
   }
 
-  private transformToGraphFormat(framesObject) {
-    const framesObjectSize = Object.keys(framesObject).length;
-    const lastFrame = Object.keys(framesObject)[framesObjectSize - 1];
-    const intervals = Math.floor(lastFrame / 1000); // hardcoded 1000 to get every second
+  private handleGraphClick(event, payload) {
+    const videoElement = this.videoOverlay?.getElement();
 
+    if (videoElement) {
+      videoElement.currentTime = payload.index;
+      videoElement.pause();
+    }
+  }
+
+  private transformToGraphFormat(framesObject, fps) {
     const filteredIntervals = [];
+    const tagSet = new Set();
 
-    for (let i = 0; i < intervals; i++) {
-      const filteredFrameInfo = framesObject[i * 1000].reduce(
+    const framesObjectSize = Object.keys(framesObject).length;
+    const frameIntervals = Object.keys(framesObject);
+    for (let i = 0; i < framesObjectSize - 1; i += Math.round(fps)) {
+      const frameInterval = frameIntervals[i];
+      const filteredFrameInfo = framesObject[frameInterval].reduce(
         (result, annotation) => {
           if (annotation.confidence > this.state.confidence) {
             result.push(annotation.tag);
+            tagSet.add(annotation.tag.name);
           }
           return result;
         }, []);
@@ -764,13 +777,14 @@ export default class Annotator extends Component<
         return result;
       }, []);
 
-      const graphFormatInfo = { name: i };
+      const nearestSecond = Math.round(frameInterval / 1000);
+      const graphFormatInfo = { name: nearestSecond };
       condensedFrameInfo.forEach((item) => {
         Object.assign(graphFormatInfo, item);
       });
       filteredIntervals.push(graphFormatInfo);
     }
-    return filteredIntervals;
+    return [filteredIntervals, Array.from(tagSet)];
   }
 
   /**
@@ -827,9 +841,9 @@ export default class Annotator extends Component<
         this.state.inferenceOptions.iou
       )
         .then(response => {
-          if (response.data?.frames) {
-            const filteredIntervals = this.transformToGraphFormat(response.data.frames);
-            this.setState({ videoIntervals: filteredIntervals });
+          if (response.data?.frames && response.data?.fps) {
+            const graphData = this.transformToGraphFormat(response.data.frames, response.data.fps);
+            this.setState({ videoIntervals: graphData[0], graphYValues: graphData[1] });
           }
           if (this.currentAsset.url === asset.url && singleAnalysis) {
             const videoElement = this.videoOverlay.getElement();
@@ -1626,9 +1640,8 @@ export default class Annotator extends Component<
                 this.videoOverlay ? (
                 <AnalyticsBar
                   videoIntervals={this.state.videoIntervals}
-                  confidence={this.state.confidence}
-                  videoElement={this.videoOverlay.getElement()}
-                  tags={Object.keys(this.state.tagInfo.tags)}
+                  handleGraphClick={this.handleGraphClick}
+                  graphYValues={this.state.graphYValues}
                 />
               ) :
                 <ImageBar

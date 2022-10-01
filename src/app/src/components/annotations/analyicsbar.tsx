@@ -11,9 +11,8 @@ import {
 
 interface AnalyticsBarProps {
   videoIntervals: any;
-  confidence: any;
-  videoElement: any;
-  tags: any;
+  handleGraphClick: any;
+  graphYValues: any;
 }
 
 const lineColors = ["#8884d8", "#82ca9d", "#4287f5"]; //hardcoded for this task for 3 tag types
@@ -21,13 +20,8 @@ const lineColors = ["#8884d8", "#82ca9d", "#4287f5"]; //hardcoded for this task 
 export default class AnalyticsBar extends Component<AnalyticsBarProps> {
   render() {
 
-    const handleDotClick = (event, payload) => {
-      this.props.videoElement.currentTime = payload.index;
-      this.props.videoElement.pause();
-    }
-
     const renderLines = () => {
-      return this.props.tags.map((tag, index) => <Line type="monotone" dataKey={tag} stroke={lineColors[index]} activeDot={{ onClick: handleDotClick }} />)
+      return this.props.graphYValues.map((tag, index) => <Line type="monotone" dataKey={tag} stroke={lineColors[index]} activeDot={{ onClick: this.props.handleGraphClick }} />)
     };
 
     return (
